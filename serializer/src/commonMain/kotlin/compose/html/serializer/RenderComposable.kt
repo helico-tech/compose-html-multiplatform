@@ -1,16 +1,8 @@
 package compose.html.serializer
 
-import androidx.compose.runtime.BroadcastFrameClock
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.Composition
-import androidx.compose.runtime.CompositionLocalProvider
-import androidx.compose.runtime.Recomposer
 import compose.html.HtmlElementNode
-import compose.html.LocalStaticRendering
-import compose.html.TextApplier
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Job
-import kotlinx.coroutines.launch
+import compose.html.composeOnce
 
 fun renderComposableToString(
     prettyPrint: Boolean = true,
@@ -41,26 +33,3 @@ fun renderComposableTo(
     }
 }
 
-internal fun composeOnce(root: HtmlElementNode, content: @Composable () -> Unit) {
-    val clock = BroadcastFrameClock()
-    val context = kotlinx.coroutines.Dispatchers.Unconfined + clock + Job()
-    val scope = CoroutineScope(context)
-    val recomposer = Recomposer(context)
-    val composition = Composition(TextApplier(root), recomposer)
-
-    scope.launch { recomposer.runRecomposeAndApplyChanges() }
-
-    composition.setContent {
-        CompositionLocalProvider(LocalStaticRendering provides true) {
-            content()
-        }
-    }
-
-    // Send a frame to trigger any pending recomposition
-    clock.sendFrame(0L)
-
-    recomposer.close()
-    // Note: we intentionally do NOT call composition.dispose() here because
-    // dispose() triggers applier.clear(), which would remove the built tree
-    // that we need for serialization.
-}

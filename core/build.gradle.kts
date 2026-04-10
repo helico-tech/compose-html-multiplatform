@@ -21,5 +21,8 @@ kotlin {
         jsMain.dependencies {
             api(compose.html.core)
         }
+        jvmTest.dependencies {
+            implementation(project(":svg"))
+        }
     }
 }
