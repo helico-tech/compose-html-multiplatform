@@ -72,12 +72,12 @@ class TextApplierTest {
     }
 
     @Test
-    fun onClearRemovesAll() {
+    fun clearRemovesAll() {
         val root = HtmlElementNode("root")
         val applier = TextApplier(root)
         applier.insertBottomUp(0, HtmlElementNode("a"))
         applier.insertBottomUp(1, HtmlElementNode("b"))
-        applier.onClear()
+        applier.clear()
         assertEquals(0, root.children.size)
     }
 }
