@@ -510,6 +510,104 @@ FileWriter("output.html").use { writer ->
 }
 ```
 
+## Composition Model: Single-Pass, No Effects
+
+The text renderer runs composition exactly once — no recomposition, no snapshot observation, no effect processing.
+
+**What this means:**
+- `LaunchedEffect`, `SideEffect`, `DisposableEffect` are not supported in static rendering. They will be ignored (never executed).
+- `mutableStateOf`, `derivedStateOf`, `snapshotFlow` have no effect — there is no recomposer to observe changes.
+- Composables must be pure functions of their inputs: parameters in, tree out.
+
+**Why:**
+- The Compose snapshot system uses thread-local state (`Snapshot.current`). On a server handling concurrent requests, snapshot state would leak between threads/requests.
+- `Recomposer` is tightly coupled to a single coroutine context. Running it on a server adds complexity with no benefit for static output.
+- Static HTML/SVG generation has no interactive state — there is nothing to recompose.
+
+**Implementation:** `composeOnce` creates a `Composition`, calls `setContent` once, and immediately disposes. No `Recomposer` loop is started.
+
+```kotlin
+internal fun composeOnce(root: HtmlElementNode, content: @Composable () -> Unit) {
+    val applier = TextApplier(root)
+    val composition = Composition(applier, createRecomposer())
+    composition.setContent {
+        CompositionLocalProvider(LocalStaticRendering provides true) {
+            content()
+        }
+    }
+    composition.dispose()
+}
+```
+
+`CompositionLocalProvider` and `remember` without keys still work — they are resolved during the single composition pass. Conditional logic (`if`/`when` on parameters) works. Only reactive state changes are unsupported.
+
+## Testing Strategy
+
+### Test levels
+
+| Level | What it tests | Source set | Assertion style |
+|-------|--------------|------------|-----------------|
+| Node tree construction | `TextApplier` builds correct `HtmlNode` tree | `core/src/commonTest` | Assert tree structure (tag names, attrs, children) |
+| Serializer output | `TreeSerializer` produces correct HTML/SVG strings | `serializer/src/commonTest` | String comparison on hand-built trees |
+| End-to-end rendering | `renderComposableToString` with real composables | `core/src/commonTest` | String comparison of final output |
+| JS DOM rendering | Existing browser-based tests unchanged | `core/src/jsTest` | `innerHTML`/`outerHTML` + DOM property inspection |
+
+### Edge cases to test (derived from reference implementation)
+
+**Attribute handling:**
+- Multiple `classes()` calls accumulate: `classes("a", "b")` then `classes("c", "d")` produces `class="a b c d"`
+- `attr("class", ...)` overrides `classes()` calls
+- Last-write-wins for duplicate attributes: `attr("x", "1")` then `attr("x", "2")` yields `x="2"`
+- Boolean attributes render as empty value: `disabled` produces `disabled=""`
+- Attribute ordering is preserved in output
+
+**Inline style handling:**
+- Multiple `style {}` blocks merge: `"opacity: 0.4; padding: 40px;"`
+- Last-write-wins within a single style block
+- `attr("style", ...)` overrides `style {}` calls
+- CSS custom properties preserve `--` prefix: `--color: red` not `color: red`
+- Style format: `"property: value;"` with space after colon
+
+**Void elements:**
+- HTML void elements self-close: `<br>`, `<hr>`, `<img>`, `<input>`, `<col>`, `<area>`, `<embed>`, `<param>`, `<source>`, `<track>`, `<wbr>`
+- SVG leaf elements with no children self-close: `<circle ... />`
+- XHTML mode produces `<br />` vs HTML mode `<br>`
+- Non-void elements with no children still get closing tag: `<div></div>`
+
+**SVG-specific:**
+- CamelCase element names preserved: `clipPath`, `linearGradient`, `radialGradient`, `textPath`, `animateMotion`, `animateTransform`
+- `xmlns` attribute on root `<svg>` element for standalone SVG output
+- Numeric vs CSS-unit attribute values: `cx="50"` vs `cx="50px"`
+- Path `d` attribute with multiline data preserved
+- `viewBox` attribute with space-separated values
+- Nested SVG structures: `<svg><defs><linearGradient>...</linearGradient></defs></svg>`
+
+**Text content:**
+- HTML escaping in text nodes: `<`, `>`, `&` escaped
+- Attribute value escaping: `"` escaped in attribute values
+- Empty text nodes
+- Adjacent text nodes
+
+**Pretty printing:**
+- Indentation of nested elements
+- No indentation when `prettyPrint = false`
+- Mixed inline text and element children
+- Deeply nested structures
+
+**Composable behavior (single-pass):**
+- Conditional rendering: `if (condition) { Div { } }` produces correct output
+- List rendering: `items.forEach { Div { Text(it) } }`
+- `remember` resolves during single pass
+- `CompositionLocalProvider` values propagate correctly
+- Nested composable functions compose correctly
+
+### What we do NOT test
+
+- Recomposition (not supported)
+- Event listeners (not applicable to static rendering)
+- DOM mutation/lifecycle (JS-only, covered by existing tests)
+- CSS computed styles (no browser in text rendering)
+
 ## What stays the same
 
 The JS interactive experience. Existing Compose HTML code targeting the browser continues to work identically via the `DomApplier` path.
