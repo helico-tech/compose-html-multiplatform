@@ -18,5 +18,8 @@ kotlin {
             implementation(kotlin("test"))
             implementation(compose.runtime)
         }
+        jsMain.dependencies {
+            api(compose.html.core)
+        }
     }
 }
