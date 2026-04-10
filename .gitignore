@@ -1,3 +1,5 @@
 .gradle/
 build/
 */build/
+.kotlin/
+kotlin-js-store/
