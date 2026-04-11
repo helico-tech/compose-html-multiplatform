@@ -5,7 +5,7 @@ plugins {
 }
 
 allprojects {
-    group = "com.helico-tech.compose"
+    group = "nl.helico.compose"
     version = "0.1.0"
 }
 
